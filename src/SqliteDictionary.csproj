@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net7.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+
+		<!-- package info -->
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+
+		<Title>CypherPotato.SqliteDictionary</Title>
+		<PackageId>CypherPotato.SqliteDictionary</PackageId>
+		<RootNamespace>CypherPotato.SqliteDictionary</RootNamespace>
+		<Product>CypherPotato.SqliteDictionary</Product>
+
+		<Authors>CypherPotato</Authors>
+		<Company>CypherPotato</Company>
+		<Description>Provides an IDictionary based on an SqliteEngine.</Description>
+		<PackageTags>sqlite, dictionary</PackageTags>
+		<RepositoryType>git</RepositoryType>
+
+		<!-- version -->
+		<AssemblyVersion>0.3.0.0</AssemblyVersion>
+		<FileVersion>0.3.0.0</FileVersion>
+		<Version>0.3.0.0</Version>
+
+		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+		<SignAssembly>False</SignAssembly>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<PackRelease>True</PackRelease>
+		<DebugType>embedded</DebugType>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\LICENSE.txt">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\readme.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+</Project>

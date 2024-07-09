@@ -5,15 +5,29 @@ using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using System.Diagnostics.CodeAnalysis;
 
+/// <summary>
+/// Provides an Sqlite based data-persistant dictionary of strings.
+/// </summary>
 public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 {
     private SqliteConnection connection;
+    private bool disposed;
 
+    /// <summary>
+    /// Opens an new read-only <see cref="SqliteDictionary"/> instance in the specified
+    /// database name.
+    /// </summary>
+    /// <param name="databaseName">The database name (connection string).</param>
     public static SqliteDictionary OpenRead(string databaseName)
     {
         return new SqliteDictionary(databaseName, true);
     }
 
+    /// <summary>
+    /// Opens an new <see cref="SqliteDictionary"/> instance in the specified
+    /// database name.
+    /// </summary>
+    /// <param name="databaseName">The database name (connection string).</param>
     public static SqliteDictionary Open(string databaseName)
     {
         return new SqliteDictionary(databaseName, false);
@@ -48,6 +62,11 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    void CheckDisposed()
+    {
+        if (disposed) throw new ObjectDisposedException(nameof(SqliteDictionary));
+    }
+
     void CheckReadonly()
     {
         if (IsReadOnly) throw new InvalidOperationException("Cannot modify this dictionary: this database was openned in read-only mode.");
@@ -61,37 +80,55 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Gets or sets an value based on their key.
+    /// </summary>
+    /// <param name="key">The object key.</param>
     public string? this[string key]
     {
         get
         {
+            CheckDisposed();
             if (TryGetValue(key, out var value))
             {
                 return value;
             }
-            return null;
+            throw new KeyNotFoundException("The specified key is not defined in this database.");
         }
         set
         {
+            CheckDisposed();
             CheckReadonly();
             CheckKey(key);
-            using (SqliteCommand command = connection.CreateCommand())
+
+            if (value is null)
             {
-                command.CommandText = """
+                Remove(key);
+            }
+            else
+            {
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = """
                     INSERT OR REPLACE INTO base (key, value) VALUES (@key, @value);
                     """;
 
-                command.Parameters.AddWithValue("key", key);
-                command.Parameters.AddWithValue("value", value);
-                command.ExecuteNonQuery();
+                    command.Parameters.AddWithValue("key", key);
+                    command.Parameters.AddWithValue("value", value);
+                    command.ExecuteNonQuery();
+                }
             }
         }
     }
 
+    /// <summary>
+    /// Gets an collection of keys defined in this database.
+    /// </summary>
     public ICollection<string> Keys
     {
         get
         {
+            CheckDisposed();
             using (SqliteCommand command = connection.CreateCommand())
             {
                 command.CommandText = """
@@ -112,10 +149,14 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Gets an collection of values defined in this database.
+    /// </summary>
     public ICollection<string?> Values
     {
         get
         {
+            CheckDisposed();
             using (SqliteCommand command = connection.CreateCommand())
             {
                 command.CommandText = """
@@ -136,10 +177,14 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Gets the count of value pairs in this database.
+    /// </summary>
     public int Count
     {
         get
         {
+            CheckDisposed();
             using (SqliteCommand command = connection.CreateCommand())
             {
                 command.CommandText = """
@@ -158,10 +203,19 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Gets an boolean indicating if this <see cref="SqliteDictionary"/> is read-only.
+    /// </summary>
     public bool IsReadOnly { get; }
 
+    /// <summary>
+    /// Adds an item to this database.
+    /// </summary>
+    /// <param name="key">The unique object key.</param>
+    /// <param name="value">The object value.</param>
     public void Add(string key, string? value)
     {
+        CheckDisposed();
         CheckReadonly();
         CheckKey(key);
         using (SqliteCommand command = connection.CreateCommand())
@@ -176,13 +230,21 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Adds an item to this database.
+    /// </summary>
+    /// <param name="item">The pair of key and value to add.</param>
     public void Add(KeyValuePair<string, string?> item)
     {
         Add(item.Key, item.Value);
     }
 
+    /// <summary>
+    /// Clears and removes all items from this database.
+    /// </summary>
     public void Clear()
     {
+        CheckDisposed();
         CheckReadonly();
         using (SqliteCommand command = connection.CreateCommand())
         {
@@ -193,8 +255,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Checks if the specified key and value exists in the current database.
+    /// </summary>
+    /// <param name="item">The key-value-pair to check whether is defined or not.</param>
     public bool Contains(KeyValuePair<string, string?> item)
     {
+        CheckDisposed();
         CheckKey(item.Key);
         using (SqliteCommand command = connection.CreateCommand())
         {
@@ -215,8 +282,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         return false;
     }
 
+    /// <summary>
+    /// Checks if the specified key is defined in this database.
+    /// </summary>
+    /// <param name="key">The key to search.</param>
     public bool ContainsKey(string key)
     {
+        CheckDisposed();
         CheckKey(key);
         using (SqliteCommand command = connection.CreateCommand())
         {
@@ -236,11 +308,15 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         return false;
     }
 
+    /// <summary>
+    /// This method is not implemented and should not be used.
+    /// </summary>
     public void CopyTo(KeyValuePair<string, string?>[] array, int arrayIndex)
     {
         throw new NotImplementedException("This database does not support this action.");
     }
 
+    /// <inheritdoc/>
     public IEnumerator<KeyValuePair<string, string?>> GetEnumerator()
     {
         using (SqliteCommand command = connection.CreateCommand())
@@ -251,7 +327,7 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 
             using (var reader = command.ExecuteReader())
             {
-                if (reader.Read())
+                while (reader.Read())
                 {
                     string key = reader.GetString(0);
                     string? value = null;
@@ -267,8 +343,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Tries to remove the specified key from this database.
+    /// </summary>
+    /// <param name="key">The key to remove.</param>
     public bool Remove(string key)
     {
+        CheckDisposed();
         CheckReadonly();
         CheckKey(key);
         using (SqliteCommand command = connection.CreateCommand())
@@ -286,8 +367,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Tries to remove the specified key and value from this database.
+    /// </summary>
+    /// <param name="item">The value-key pair to remove.</param>
     public bool Remove(KeyValuePair<string, string?> item)
     {
+        CheckDisposed();
         CheckReadonly();
         CheckKey(item.Key);
         using (SqliteCommand command = connection.CreateCommand())
@@ -306,8 +392,23 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         }
     }
 
+    /// <summary>
+    /// Gets the value associated with the specified key.
+    /// </summary>
+    /// <param name="key">The key whose value to get.</param>
+    public (bool CouldGet, string? Value) TryGetValue(string key)
+    {
+        if (TryGetValue(key, out var value))
+        {
+            return (true, value);
+        }
+        return (false, null);
+    }
+
+    /// <inheritdoc/>
     public bool TryGetValue(string key, [MaybeNullWhen(false)] out string? value)
     {
+        CheckDisposed();
         CheckKey(key);
         using (SqliteCommand command = connection.CreateCommand())
         {
@@ -334,8 +435,10 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         return GetEnumerator();
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
+        disposed = true;
         connection.Dispose();
         SqliteConnection.ClearPool(connection);
     }

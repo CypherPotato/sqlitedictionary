@@ -93,7 +93,7 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
             {
                 return value;
             }
-            throw new KeyNotFoundException("The specified key is not defined in this database.");
+            return null;
         }
         set
         {
@@ -110,8 +110,8 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
-                    INSERT OR REPLACE INTO base (key, value) VALUES (@key, @value);
-                    """;
+                        INSERT OR REPLACE INTO base (key, value) VALUES (@key, @value);
+                        """;
 
                     command.Parameters.AddWithValue("key", key);
                     command.Parameters.AddWithValue("value", value);

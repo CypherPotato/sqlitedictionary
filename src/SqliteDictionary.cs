@@ -5,6 +5,8 @@ using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using System.Diagnostics.CodeAnalysis;
 
+namespace CypherPotato.SqliteCollections;
+
 /// <summary>
 /// Provides an Sqlite based data-persistant dictionary of strings.
 /// </summary>

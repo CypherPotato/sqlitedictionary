@@ -14,15 +14,18 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 {
     private SqliteConnection connection;
     private bool disposed;
+    private string tableName;
+    private object queryLocker = new object();
 
     /// <summary>
     /// Opens an new read-only <see cref="SqliteDictionary"/> instance in the specified
     /// database name.
     /// </summary>
     /// <param name="databaseName">The database name (connection string).</param>
-    public static SqliteDictionary OpenRead(string databaseName)
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteDictionary OpenRead(string databaseName, string tableName = "base")
     {
-        return new SqliteDictionary(databaseName, true);
+        return new SqliteDictionary(databaseName, tableName, true);
     }
 
     /// <summary>
@@ -30,14 +33,16 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// database name.
     /// </summary>
     /// <param name="databaseName">The database name (connection string).</param>
-    public static SqliteDictionary Open(string databaseName)
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteDictionary Open(string databaseName, string tableName = "base")
     {
-        return new SqliteDictionary(databaseName, false);
+        return new SqliteDictionary(databaseName, tableName, false);
     }
 
-    internal SqliteDictionary(string databaseName, bool isReadOnly = true)
+    internal SqliteDictionary(string databaseName, string tableName, bool isReadOnly = true)
     {
         this.IsReadOnly = isReadOnly;
+        this.tableName = tableName;
 
         if (!databaseName.EndsWith(".db", StringComparison.CurrentCultureIgnoreCase))
             databaseName += ".db";
@@ -50,18 +55,19 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 
     void EnsureDictionaryTable()
     {
-        using (DbCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                CREATE TABLE IF NOT EXISTS "base" (
-                	"key"	TEXT NOT NULL UNIQUE,
-                	"value"	TEXT,
-                	PRIMARY KEY("key")
-                );
-                """;
+        lock (queryLocker)
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = $"""
+                    CREATE TABLE IF NOT EXISTS "{tableName}" (
+                        "key"	TEXT NOT NULL UNIQUE,
+                        "value"	TEXT,
+                        PRIMARY KEY("key")
+                    );
+                    """;
 
-            command.ExecuteNonQuery();
-        }
+                command.ExecuteNonQuery();
+            }
     }
 
     void CheckDisposed()
@@ -81,6 +87,11 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
             throw new InvalidOperationException("The key cannot be empty or null.");
         }
     }
+
+    /// <summary>
+    /// Gets the dictionary <see cref="TableName"/>.
+    /// </summary>
+    public string TableName { get => tableName; }
 
     /// <summary>
     /// Gets or sets an value based on their key.
@@ -109,16 +120,17 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
             }
             else
             {
-                using (SqliteCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = """
-                        INSERT OR REPLACE INTO base (key, value) VALUES (@key, @value);
+                lock (queryLocker)
+                    using (SqliteCommand command = connection.CreateCommand())
+                    {
+                        command.CommandText = $"""
+                        INSERT OR REPLACE INTO "{tableName}" (key, value) VALUES (@key, @value);
                         """;
 
-                    command.Parameters.AddWithValue("key", key);
-                    command.Parameters.AddWithValue("value", value);
-                    command.ExecuteNonQuery();
-                }
+                        command.Parameters.AddWithValue("key", key);
+                        command.Parameters.AddWithValue("value", value);
+                        command.ExecuteNonQuery();
+                    }
             }
         }
     }
@@ -131,23 +143,25 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         get
         {
             CheckDisposed();
-            using (SqliteCommand command = connection.CreateCommand())
-            {
-                command.CommandText = """
-                    SELECT key FROM base;
-                    """;
 
-                List<string> result = new List<string>();
-                using (var reader = command.ExecuteReader())
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand())
                 {
-                    if (reader.Read())
-                    {
-                        result.Add(reader.GetString(0));
-                    }
-                }
+                    command.CommandText = $"""
+                        SELECT key FROM "{tableName}";
+                        """;
 
-                return result;
-            }
+                    List<string> result = new List<string>();
+                    using (var reader = command.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            result.Add(reader.GetString(0));
+                        }
+                    }
+
+                    return result;
+                }
         }
     }
 
@@ -159,23 +173,24 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         get
         {
             CheckDisposed();
-            using (SqliteCommand command = connection.CreateCommand())
-            {
-                command.CommandText = """
-                    SELECT value FROM base;
-                    """;
-
-                List<string?> result = new List<string?>();
-                using (var reader = command.ExecuteReader())
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand())
                 {
-                    if (reader.Read())
-                    {
-                        result.Add(reader.IsDBNull(0) ? null : reader.GetString(0));
-                    }
-                }
+                    command.CommandText = $"""
+                        SELECT value FROM "{tableName}";
+                        """;
 
-                return result;
-            }
+                    List<string?> result = new List<string?>();
+                    using (var reader = command.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            result.Add(reader.IsDBNull(0) ? null : reader.GetString(0));
+                        }
+                    }
+
+                    return result;
+                }
         }
     }
 
@@ -187,20 +202,21 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         get
         {
             CheckDisposed();
-            using (SqliteCommand command = connection.CreateCommand())
-            {
-                command.CommandText = """
-                    SELECT COUNT(key) FROM base;
-                    """;
-
-                using (var reader = command.ExecuteReader())
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand())
                 {
-                    if (reader.Read())
+                    command.CommandText = $"""
+                        SELECT COUNT(key) FROM "{tableName}";
+                        """;
+
+                    using (var reader = command.ExecuteReader())
                     {
-                        return reader.GetInt32(0);
+                        if (reader.Read())
+                        {
+                            return reader.GetInt32(0);
+                        }
                     }
                 }
-            }
             return 0;
         }
     }
@@ -220,16 +236,17 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         CheckDisposed();
         CheckReadonly();
         CheckKey(key);
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                INSERT INTO base (key, value) VALUES (@key, @value);
-                """;
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = $"""
+                    INSERT INTO "{tableName}" (key, value) VALUES (@key, @value);
+                    """;
 
-            command.Parameters.AddWithValue("key", key);
-            command.Parameters.AddWithValue("value", value);
-            command.ExecuteNonQuery();
-        }
+                command.Parameters.AddWithValue("key", key);
+                command.Parameters.AddWithValue("value", value);
+                command.ExecuteNonQuery();
+            }
     }
 
     /// <summary>
@@ -248,13 +265,14 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     {
         CheckDisposed();
         CheckReadonly();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                DELETE FROM base;
-                """;
-            command.ExecuteNonQuery();
-        }
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = $"""
+                    DELETE FROM "{tableName}";
+                    """;
+                command.ExecuteNonQuery();
+            }
     }
 
     /// <summary>
@@ -265,22 +283,23 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     {
         CheckDisposed();
         CheckKey(item.Key);
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT * FROM base WHERE key = @key AND value = @value LIMIT 1;
-                """;
-            command.Parameters.AddWithValue("key", item.Key);
-            command.Parameters.AddWithValue("value", item.Value);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                if (reader.Read())
+                command.CommandText = $"""
+                    SELECT * FROM "{tableName}" WHERE key = @key AND value = @value LIMIT 1;
+                    """;
+                command.Parameters.AddWithValue("key", item.Key);
+                command.Parameters.AddWithValue("value", item.Value);
+
+                using (var reader = command.ExecuteReader())
                 {
-                    return true;
+                    if (reader.Read())
+                    {
+                        return true;
+                    }
                 }
             }
-        }
         return false;
     }
 
@@ -292,21 +311,22 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     {
         CheckDisposed();
         CheckKey(key);
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT * FROM base WHERE key = @key LIMIT 1;
-                """;
-            command.Parameters.AddWithValue("key", key);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                if (reader.Read())
+                command.CommandText = $"""
+                    SELECT * FROM "{tableName}" WHERE key = @key LIMIT 1;
+                    """;
+                command.Parameters.AddWithValue("key", key);
+
+                using (var reader = command.ExecuteReader())
                 {
-                    return true;
+                    if (reader.Read())
+                    {
+                        return true;
+                    }
                 }
             }
-        }
         return false;
     }
 
@@ -321,28 +341,29 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// <inheritdoc/>
     public IEnumerator<KeyValuePair<string, string?>> GetEnumerator()
     {
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT key, value FROM base;
-                """;
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                while (reader.Read())
+                command.CommandText = $"""
+                    SELECT key, value FROM "{tableName}";
+                    """;
+
+                using (var reader = command.ExecuteReader())
                 {
-                    string key = reader.GetString(0);
-                    string? value = null;
-
-                    if (!reader.IsDBNull(1))
+                    while (reader.Read())
                     {
-                        value = reader.GetString(1);
-                    }
+                        string key = reader.GetString(0);
+                        string? value = null;
 
-                    yield return new KeyValuePair<string, string?>(key, value);
+                        if (!reader.IsDBNull(1))
+                        {
+                            value = reader.GetString(1);
+                        }
+
+                        yield return new KeyValuePair<string, string?>(key, value);
+                    }
                 }
             }
-        }
     }
 
     /// <summary>
@@ -354,19 +375,20 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         CheckDisposed();
         CheckReadonly();
         CheckKey(key);
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                DELETE FROM base WHERE key = @key;
-                """;
-            command.Parameters.AddWithValue("key", key);
-            command.ExecuteNonQuery();
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                return reader.RecordsAffected >= 1;
+                command.CommandText = $"""
+                    DELETE FROM "{tableName}" WHERE key = @key;
+                    """;
+                command.Parameters.AddWithValue("key", key);
+                command.ExecuteNonQuery();
+
+                using (var reader = command.ExecuteReader())
+                {
+                    return reader.RecordsAffected >= 1;
+                }
             }
-        }
     }
 
     /// <summary>
@@ -378,20 +400,21 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         CheckDisposed();
         CheckReadonly();
         CheckKey(item.Key);
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                DELETE FROM base WHERE key = @key AND value = @value;
-                """;
-            command.Parameters.AddWithValue("key", item.Key);
-            command.Parameters.AddWithValue("value", item.Value);
-            command.ExecuteNonQuery();
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                return reader.RecordsAffected >= 1;
+                command.CommandText = $"""
+                    DELETE FROM "{tableName}" WHERE key = @key AND value = @value;
+                    """;
+                command.Parameters.AddWithValue("key", item.Key);
+                command.Parameters.AddWithValue("value", item.Value);
+                command.ExecuteNonQuery();
+
+                using (var reader = command.ExecuteReader())
+                {
+                    return reader.RecordsAffected >= 1;
+                }
             }
-        }
     }
 
     /// <summary>
@@ -412,22 +435,24 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     {
         CheckDisposed();
         CheckKey(key);
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT value FROM base WHERE key = @key LIMIT 1;
-                """;
-            command.Parameters.AddWithValue("key", key);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                if (reader.Read())
+                command.CommandText = $"""
+                    SELECT value FROM "{tableName}" WHERE key = @key LIMIT 1;
+                    """;
+                command.Parameters.AddWithValue("key", key);
+
+                using (var reader = command.ExecuteReader())
                 {
-                    value = reader.IsDBNull(0) ? null : reader.GetString(0);
-                    return true;
+                    if (reader.Read())
+                    {
+                        value = reader.IsDBNull(0) ? null : reader.GetString(0);
+                        return true;
+                    }
                 }
             }
-        }
+
         value = null;
         return false;
     }
@@ -442,6 +467,5 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     {
         disposed = true;
         connection.Dispose();
-        SqliteConnection.ClearPool(connection);
     }
 }

@@ -13,15 +13,18 @@ public sealed class SqliteList : IDisposable, IList<string?>
 {
     private SqliteConnection connection;
     private bool disposedValue;
+    private string tableName;
+    private object queryLocker = new object();
 
     /// <summary>
     /// Opens an new read-only <see cref="SqliteList"/> instance in the specified
     /// database name.
     /// </summary>
     /// <param name="databaseName">The database name (connection string).</param>
-    public static SqliteList OpenRead(string databaseName)
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteList OpenRead(string databaseName, string tableName = "list")
     {
-        return new SqliteList(databaseName, true);
+        return new SqliteList(databaseName, tableName, true);
     }
 
     /// <summary>
@@ -29,9 +32,10 @@ public sealed class SqliteList : IDisposable, IList<string?>
     /// database name.
     /// </summary>
     /// <param name="databaseName">The database name (connection string).</param>
-    public static SqliteList Open(string databaseName)
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteList Open(string databaseName, string tableName = "list")
     {
-        return new SqliteList(databaseName, false);
+        return new SqliteList(databaseName, tableName, false);
     }
 
     /// <summary>
@@ -44,26 +48,27 @@ public sealed class SqliteList : IDisposable, IList<string?>
         {
             CheckDisposed();
 
-            using (SqliteCommand command = connection.CreateCommand())
-            {
-                command.CommandText = """
-                    SELECT value FROM list WHERE rowid = @index;
-                    """;
-
-                command.Parameters.AddWithValue("index", index + 1);
-
-                using (var reader = command.ExecuteReader())
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand())
                 {
-                    if (reader.Read())
+                    command.CommandText = $"""
+                        SELECT value FROM "{tableName}" WHERE rowid = @index;
+                        """;
+
+                    command.Parameters.AddWithValue("index", index + 1);
+
+                    using (var reader = command.ExecuteReader())
                     {
-                        if (reader.IsDBNull(0))
+                        if (reader.Read())
                         {
-                            return null;
+                            if (reader.IsDBNull(0))
+                            {
+                                return null;
+                            }
+                            return reader.GetString(0);
                         }
-                        return reader.GetString(0);
                     }
                 }
-            }
 
             return null;
         }
@@ -72,16 +77,17 @@ public sealed class SqliteList : IDisposable, IList<string?>
             CheckDisposed();
             CheckReadonly();
 
-            using (SqliteCommand command = connection.CreateCommand())
-            {
-                command.CommandText = """
-                    INSERT OR REPLACE INTO list (rowid, value) VALUES (@index, @value);
-                    """;
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = $"""
+                        INSERT OR REPLACE INTO "{tableName}" (rowid, value) VALUES (@index, @value);
+                        """;
 
-                command.Parameters.AddWithValue("index", index + 1);
-                command.Parameters.AddWithValue("value", value);
-                command.ExecuteNonQuery();
-            }
+                    command.Parameters.AddWithValue("index", index + 1);
+                    command.Parameters.AddWithValue("value", value);
+                    command.ExecuteNonQuery();
+                }
         }
     }
 
@@ -91,20 +97,22 @@ public sealed class SqliteList : IDisposable, IList<string?>
         get
         {
             CheckDisposed();
-            using (SqliteCommand command = connection.CreateCommand())
-            {
-                command.CommandText = """
-                    SELECT COUNT(value) FROM list;
-                    """;
 
-                using (var reader = command.ExecuteReader())
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand())
                 {
-                    if (reader.Read())
+                    command.CommandText = $"""
+                        SELECT COUNT(value) FROM "{tableName}";
+                        """;
+
+                    using (var reader = command.ExecuteReader())
                     {
-                        return reader.GetInt32(0);
+                        if (reader.Read())
+                        {
+                            return reader.GetInt32(0);
+                        }
                     }
                 }
-            }
             return 0;
         }
     }
@@ -114,9 +122,10 @@ public sealed class SqliteList : IDisposable, IList<string?>
     /// </summary>
     public bool IsReadOnly { get; private set; }
 
-    internal SqliteList(string databaseName, bool isReadOnly = true)
+    internal SqliteList(string databaseName, string tableName, bool isReadOnly = true)
     {
         this.IsReadOnly = isReadOnly;
+        this.tableName = tableName;
 
         if (!databaseName.EndsWith(".db", StringComparison.CurrentCultureIgnoreCase))
             databaseName += ".db";
@@ -129,16 +138,17 @@ public sealed class SqliteList : IDisposable, IList<string?>
 
     void EnsureListTable()
     {
-        using (DbCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                CREATE TABLE IF NOT EXISTS "list" (
-                	"value"	TEXT
-                );
-                """;
+        lock (queryLocker)
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = $"""
+                    CREATE TABLE IF NOT EXISTS "{tableName}" (
+                        "value"	TEXT
+                    );
+                    """;
 
-            command.ExecuteNonQuery();
-        }
+                command.ExecuteNonQuery();
+            }
     }
 
     void CheckDisposed()
@@ -156,51 +166,63 @@ public sealed class SqliteList : IDisposable, IList<string?>
     {
         CheckDisposed();
         CheckReadonly();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                INSERT INTO list (value) VALUES (@value);
-                """;
 
-            command.Parameters.AddWithValue("value", item);
-            command.ExecuteNonQuery();
-        }
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = $"""
+                    INSERT INTO "{tableName}" (value) VALUES (@value);
+                    """;
+
+                command.Parameters.AddWithValue("value", item);
+                command.ExecuteNonQuery();
+            }
     }
+
+    /// <summary>
+    /// Adds an item to the end of this <see cref="ICollection"/>.
+    /// </summary>
+    /// <param name="item">The item to add.</param>
+    public void Add(object? item) => Add(item?.ToString());
 
     /// <inheritdoc/>
     public void Clear()
     {
         CheckDisposed();
         CheckReadonly();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                DELETE FROM list;
-                """;
-            command.ExecuteNonQuery();
-        }
+
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = $"""
+                    DELETE FROM "{tableName}";
+                    """;
+                command.ExecuteNonQuery();
+            }
     }
 
     /// <inheritdoc/>
     public bool Contains(string? item)
     {
         CheckDisposed();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT * FROM list WHERE value = @value LIMIT 1;
-                """;
 
-            command.Parameters.AddWithValue("value", item);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                if (reader.Read())
+                command.CommandText = $"""
+                    SELECT * FROM "{tableName}" WHERE value = @value LIMIT 1;
+                    """;
+
+                command.Parameters.AddWithValue("value", item);
+
+                using (var reader = command.ExecuteReader())
                 {
-                    return true;
+                    if (reader.Read())
+                    {
+                        return true;
+                    }
                 }
             }
-        }
         return false;
     }
 
@@ -214,49 +236,51 @@ public sealed class SqliteList : IDisposable, IList<string?>
     /// <inheritdoc/>
     public IEnumerator<string?> GetEnumerator()
     {
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT value FROM list;
-                """;
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                while (reader.Read())
+                command.CommandText = $"""
+                    SELECT value FROM "{tableName}";
+                    """;
+
+                using (var reader = command.ExecuteReader())
                 {
-                    string? value = null;
-
-                    if (!reader.IsDBNull(0))
+                    while (reader.Read())
                     {
-                        value = reader.GetString(0);
-                    }
+                        string? value = null;
 
-                    yield return value;
+                        if (!reader.IsDBNull(0))
+                        {
+                            value = reader.GetString(0);
+                        }
+
+                        yield return value;
+                    }
                 }
             }
-        }
     }
 
     /// <inheritdoc/>
     public int IndexOf(string? item)
     {
         CheckDisposed();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                SELECT ROWID, * FROM list WHERE value = @value LIMIT 1;
-                """;
-
-            command.Parameters.AddWithValue("value", item);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                if (reader.Read())
+                command.CommandText = $"""
+                    SELECT ROWID, * FROM "{tableName}" WHERE value = @value LIMIT 1;
+                    """;
+
+                command.Parameters.AddWithValue("value", item);
+
+                using (var reader = command.ExecuteReader())
                 {
-                    return reader.GetInt32(0) - 1;
+                    if (reader.Read())
+                    {
+                        return reader.GetInt32(0) - 1;
+                    }
                 }
             }
-        }
         return -1;
     }
 
@@ -274,22 +298,24 @@ public sealed class SqliteList : IDisposable, IList<string?>
     public bool Remove(string? item)
     {
         CheckDisposed();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                DELETE FROM list WHERE value = @value;
-                """;
 
-            command.Parameters.AddWithValue("value", item);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                if (reader.Read())
+                command.CommandText = $"""
+                    DELETE FROM "{tableName}" WHERE value = @value;
+                    """;
+
+                command.Parameters.AddWithValue("value", item);
+
+                using (var reader = command.ExecuteReader())
                 {
-                    return true;
+                    if (reader.Read())
+                    {
+                        return true;
+                    }
                 }
             }
-        }
         return false;
     }
 
@@ -297,19 +323,21 @@ public sealed class SqliteList : IDisposable, IList<string?>
     public void RemoveAt(int index)
     {
         CheckDisposed();
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                DELETE FROM list WHERE rowid = @index;
-                """;
 
-            command.Parameters.AddWithValue("index", index + 1);
-
-            using (var reader = command.ExecuteReader())
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand())
             {
-                reader.Read();
+                command.CommandText = $"""
+                    DELETE FROM "{tableName}" WHERE rowid = @index;
+                    """;
+
+                command.Parameters.AddWithValue("index", index + 1);
+
+                using (var reader = command.ExecuteReader())
+                {
+                    reader.Read();
+                }
             }
-        }
     }
 
     IEnumerator IEnumerable.GetEnumerator()
@@ -324,7 +352,6 @@ public sealed class SqliteList : IDisposable, IList<string?>
             if (disposing)
             {
                 connection.Dispose();
-                SqliteConnection.ClearPool(connection);
             }
 
             disposedValue = true;

@@ -19,7 +19,7 @@ namespace CypherPotato.SqliteCollections;
 /// <summary>
 /// Provides an Sqlite based data-persistant dictionary of strings.
 /// </summary>
-public class SqliteDictionary : IDisposable, IDictionary<string, string?> {
+public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?> {
     private SqliteConnection connection;
     private bool disposed;
     private string tableName;

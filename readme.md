@@ -20,7 +20,7 @@ using (var db = SqliteDictionary.Open("app"))
     // removes an item
     db.Remove("item");
 
-    // gets an item, or throw an exception if not found
+    // gets an item, or null if not found
     string? s = db["item2"];
 
     // tries to get an item

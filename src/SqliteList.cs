@@ -1,13 +1,4 @@
-﻿// The Sisk Framework source code
-// Copyright (c) 2024- PROJECT PRINCIPIUM and all Sisk contributors
-//
-// The code below is licensed under the MIT license as
-// of the date of its publication, available at
-//
-// File name:   SqliteList.cs
-// Repository:  https://github.com/sisk-http/core
-
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -50,15 +41,15 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     /// <param name="index">The zero-based object index.</param>
     public string? this [ int index ] {
         get {
-            this.CheckDisposed ();
+            CheckDisposed ();
 
-            lock (this.queryLocker)
-                using (SqliteCommand command = this.connection.CreateCommand ()) {
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand ()) {
                     command.CommandText = $"""
-                        SELECT value FROM "{this.tableName}" WHERE rowid = @index;
+                        SELECT value FROM "{tableName}" WHERE rowid = @index;
                         """;
 
-                    command.Parameters.AddWithValue ( "index", index + 1 );
+                    command.Parameters.AddWithValue ( "index", index );
 
                     using (var reader = command.ExecuteReader ()) {
                         if (reader.Read ()) {
@@ -73,16 +64,16 @@ public sealed class SqliteList : IDisposable, IList<string?> {
             return null;
         }
         set {
-            this.CheckDisposed ();
-            this.CheckReadonly ();
+            CheckDisposed ();
+            CheckReadonly ();
 
-            lock (this.queryLocker)
-                using (SqliteCommand command = this.connection.CreateCommand ()) {
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand ()) {
                     command.CommandText = $"""
-                        INSERT OR REPLACE INTO "{this.tableName}" (rowid, value) VALUES (@index, @value);
+                        INSERT OR REPLACE INTO "{tableName}" (rowid, value) VALUES (@index, @value);
                         """;
 
-                    command.Parameters.AddWithValue ( "index", index + 1 );
+                    command.Parameters.AddWithValue ( "index", index );
                     command.Parameters.AddWithValue ( "value", value );
                     command.ExecuteNonQuery ();
                 }
@@ -92,12 +83,12 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     /// <inheritdoc/>
     public int Count {
         get {
-            this.CheckDisposed ();
+            CheckDisposed ();
 
-            lock (this.queryLocker)
-                using (SqliteCommand command = this.connection.CreateCommand ()) {
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand ()) {
                     command.CommandText = $"""
-                        SELECT COUNT(value) FROM "{this.tableName}";
+                        SELECT COUNT(value) FROM "{tableName}";
                         """;
 
                     using (var reader = command.ExecuteReader ()) {
@@ -116,23 +107,23 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     public bool IsReadOnly { get; private set; }
 
     internal SqliteList ( string databaseName, string tableName, bool isReadOnly = true ) {
-        this.IsReadOnly = isReadOnly;
+        IsReadOnly = isReadOnly;
         this.tableName = tableName;
 
         if (!databaseName.EndsWith ( ".db", StringComparison.CurrentCultureIgnoreCase ))
             databaseName += ".db";
 
-        this.connection = new SqliteConnection ( $"Data Source={databaseName};" );
-        this.connection.Open ();
+        connection = new SqliteConnection ( $"Data Source={databaseName};" );
+        connection.Open ();
 
-        this.EnsureListTable ();
+        EnsureListTable ();
     }
 
     void EnsureListTable () {
-        lock (this.queryLocker)
-            using (DbCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (DbCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    CREATE TABLE IF NOT EXISTS "{this.tableName}" (
+                    CREATE TABLE IF NOT EXISTS "{tableName}" (
                         "value"	TEXT
                     );
                     """;
@@ -142,24 +133,24 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     }
 
     void CheckDisposed () {
-        if (this.disposedValue)
+        if (disposedValue)
             throw new ObjectDisposedException ( nameof ( SqliteList ) );
     }
 
     void CheckReadonly () {
-        if (this.IsReadOnly)
+        if (IsReadOnly)
             throw new InvalidOperationException ( "Cannot modify this dictionary: this database was openned in read-only mode." );
     }
 
     /// <inheritdoc/>
     public void Add ( string? item ) {
-        this.CheckDisposed ();
-        this.CheckReadonly ();
+        CheckDisposed ();
+        CheckReadonly ();
 
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    INSERT INTO "{this.tableName}" (value) VALUES (@value);
+                    INSERT INTO "{tableName}" (value) VALUES (@value);
                     """;
 
                 command.Parameters.AddWithValue ( "value", item );
@@ -171,17 +162,17 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     /// Adds an item to the end of this <see cref="ICollection"/>.
     /// </summary>
     /// <param name="item">The item to add.</param>
-    public void Add ( object? item ) => this.Add ( item?.ToString () );
+    public void Add ( object? item ) => Add ( item?.ToString () );
 
     /// <inheritdoc/>
     public void Clear () {
-        this.CheckDisposed ();
-        this.CheckReadonly ();
+        CheckDisposed ();
+        CheckReadonly ();
 
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    DELETE FROM "{this.tableName}";
+                    DELETE FROM "{tableName}";
                     """;
                 command.ExecuteNonQuery ();
             }
@@ -189,12 +180,12 @@ public sealed class SqliteList : IDisposable, IList<string?> {
 
     /// <inheritdoc/>
     public bool Contains ( string? item ) {
-        this.CheckDisposed ();
+        CheckDisposed ();
 
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT * FROM "{this.tableName}" WHERE value = @value LIMIT 1;
+                    SELECT * FROM "{tableName}" WHERE value = @value LIMIT 1;
                     """;
 
                 command.Parameters.AddWithValue ( "value", item );
@@ -209,17 +200,47 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     }
 
     /// <inheritdoc/>
-    [Obsolete ( "This database does not support this action." )]
     public void CopyTo ( string? [] array, int arrayIndex ) {
-        throw new NotSupportedException ( "This database does not support this action." );
+        int index = arrayIndex;
+        foreach (var item in this) {
+            if (index >= array.Length)
+                break;
+            array [ index ] = item;
+        }
+    }
+
+    /// <summary>
+    /// Returns an iterator that iterates the collection values and row IDs from this collection.
+    /// </summary>
+    public IEnumerable<KeyValuePair<int, string?>> AsIdentifiedEnumerable () {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
+                command.CommandText = $"""
+                    SELECT ROWID, value FROM "{tableName}";
+                    """;
+
+                using (var reader = command.ExecuteReader ()) {
+                    while (reader.Read ()) {
+                        int key = -1;
+                        string? value = null;
+
+                        if (!reader.IsDBNull ( 0 )) {
+                            key = reader.GetInt32 ( 0 );
+                            value = reader.GetString ( 1 );
+                        }
+
+                        yield return new KeyValuePair<int, string?> ( key, value );
+                    }
+                }
+            }
     }
 
     /// <inheritdoc/>
     public IEnumerator<string?> GetEnumerator () {
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT value FROM "{this.tableName}";
+                    SELECT value FROM "{tableName}";
                     """;
 
                 using (var reader = command.ExecuteReader ()) {
@@ -238,28 +259,22 @@ public sealed class SqliteList : IDisposable, IList<string?> {
 
     /// <inheritdoc/>
     public int IndexOf ( string? item ) {
-        this.CheckDisposed ();
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT ROWID, * FROM "{this.tableName}" WHERE value = @value LIMIT 1;
+                    SELECT ROWID, * FROM "{tableName}" WHERE value = @value LIMIT 1;
                     """;
 
                 command.Parameters.AddWithValue ( "value", item );
 
                 using (var reader = command.ExecuteReader ()) {
                     if (reader.Read ()) {
-                        return reader.GetInt32 ( 0 ) - 1;
+                        return reader.GetInt32 ( 0 );
                     }
                 }
             }
         return -1;
-    }
-
-    /// <inheritdoc/>
-    [Obsolete ( "This database does not support this action." )]
-    public void Insert ( int index, string? item ) {
-        throw new NotSupportedException ( "This database does not support this action." );
     }
 
     /// <summary>
@@ -267,12 +282,12 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     /// </summary>
     /// <param name="item">The input string to remove in this list.</param>
     public bool Remove ( string? item ) {
-        this.CheckDisposed ();
+        CheckDisposed ();
 
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    DELETE FROM "{this.tableName}" WHERE value = @value;
+                    DELETE FROM "{tableName}" WHERE value = @value;
                     """;
 
                 command.Parameters.AddWithValue ( "value", item );
@@ -288,40 +303,42 @@ public sealed class SqliteList : IDisposable, IList<string?> {
 
     /// <inheritdoc/>
     public void RemoveAt ( int index ) {
-        this.CheckDisposed ();
+        CheckDisposed ();
 
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    DELETE FROM "{this.tableName}" WHERE rowid = @index;
+                    DELETE FROM "{tableName}" WHERE rowid = @index;
                     """;
 
-                command.Parameters.AddWithValue ( "index", index + 1 );
+                command.Parameters.AddWithValue ( "index", index );
 
-                using (var reader = command.ExecuteReader ()) {
-                    reader.Read ();
-                }
+                command.ExecuteNonQuery ();
             }
     }
 
     IEnumerator IEnumerable.GetEnumerator () {
-        return this.GetEnumerator ();
+        return GetEnumerator ();
     }
 
     private void Dispose ( bool disposing ) {
-        if (!this.disposedValue) {
+        if (!disposedValue) {
             if (disposing) {
-                this.connection.Dispose ();
+                connection.Dispose ();
             }
 
-            this.disposedValue = true;
+            disposedValue = true;
         }
     }
 
     /// <inheritdoc/>
     public void Dispose () {
         // Não altere este código. Coloque o código de limpeza no método 'Dispose(bool disposing)'
-        this.Dispose ( disposing: true );
+        Dispose ( disposing: true );
         GC.SuppressFinalize ( this );
+    }
+
+    void IList<string?>.Insert ( int index, string? item ) {
+        throw new NotSupportedException ();
     }
 }

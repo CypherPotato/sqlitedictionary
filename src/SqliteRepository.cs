@@ -9,7 +9,7 @@ namespace CypherPotato.SqliteCollections;
 /// Represents a repository for storing and retrieving entities in a SQLite database.
 /// </summary>
 /// <typeparam name="TEntity">The type of entity stored in the repository.</typeparam>
-public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEntity : notnull {
+public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>, IDisposable where TEntity : notnull {
     private SqliteList? sqliteList;
     private bool disposedValue;
 
@@ -27,7 +27,7 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     /// <param name="entity">The entity to serialize.</param>
     /// <returns>A string representation of the entity.</returns>
     protected virtual string SerializeEntity ( TEntity entity ) {
-        return JsonSerializer.Serialize ( entity );
+        return JsonSerializer.Serialize ( entity, JsonSerializerOptions.Default );
     }
 
     /// <summary>
@@ -36,7 +36,17 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     /// <param name="encodedEntity">The string to deserialize.</param>
     /// <returns>The deserialized entity.</returns>
     protected virtual TEntity DeserializeEntity ( string encodedEntity ) {
-        return JsonSerializer.Deserialize<TEntity> ( encodedEntity )!;
+        return JsonSerializer.Deserialize<TEntity> ( encodedEntity, JsonSerializerOptions.Default )!;
+    }
+
+    /// <summary>
+    /// Checks if two entities are equals.
+    /// </summary>
+    /// <param name="a">The first entity to compare.</param>
+    /// <param name="b">The second entity to compare.</param>
+    /// <returns>True if the entities are equal, false otherwise.</returns>
+    protected virtual bool EntityEquals ( TEntity a, TEntity b ) {
+        return a.Equals ( b );
     }
 
     SqliteList GetDatabaseInstance () {
@@ -85,6 +95,21 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     }
 
     /// <summary>
+    /// Adds or updates an entity in the repository.
+    /// </summary>
+    /// <param name="item">The entity to add or update.</param>
+    /// <remarks>If the entity already exists in the repository, it will be updated; otherwise, it will be added.</remarks>
+    public void AddOrUpdate ( TEntity item ) {
+        int foundId = IndexOf ( item );
+        if (foundId == -1) {
+            Add ( item );
+        }
+        else {
+            this [ foundId ] = item;
+        }
+    }
+
+    /// <summary>
     /// Removes all entities from the repository.
     /// </summary>
     public void Clear () {
@@ -99,7 +124,7 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     public bool Contains ( TEntity item ) {
         using var enumerator = GetEnumerator ();
         while (enumerator.MoveNext ()) {
-            if (enumerator.Current.Equals ( item ))
+            if (EntityEquals ( enumerator.Current, item ))
                 return true;
         }
         return false;
@@ -113,9 +138,9 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     public void CopyTo ( TEntity [] array, int arrayIndex ) {
         int index = arrayIndex;
         foreach (var item in this) {
-            if (index >= array.Length)
+            if (index > array.Length)
                 break;
-            array [ index ] = item;
+            array [ index++ ] = item;
         }
     }
 
@@ -133,9 +158,9 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     }
 
     /// <summary>
-    /// Returns an enumerator that iterates through the entities in the repository, along with their identifiers.
+    /// Returns an enumerator that iterates through the entities in the repository, along with their row id.
     /// </summary>
-    /// <returns>An enumerator that iterates through the entities in the repository, along with their identifiers.</returns>
+    /// <returns>An enumerator that iterates through the entities in the repository, along with their row id.</returns>
     public IEnumerable<KeyValuePair<int, TEntity>> AsIdentifiedEnumerable () {
         foreach (var row in GetDatabaseInstance ().AsIdentifiedEnumerable ()) {
             if (row.Value is null)
@@ -161,12 +186,34 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
     public bool Remove ( TEntity item ) {
         using var enumerator = AsIdentifiedEnumerable ().GetEnumerator ();
         while (enumerator.MoveNext ()) {
-            if (enumerator.Current.Value.Equals ( item )) {
+            if (EntityEquals ( enumerator.Current.Value, item )) {
                 RemoveAt ( enumerator.Current.Key );
                 return true;
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Removes all entities that match the specified <paramref name="predicate"/> from the repository.
+    /// </summary>
+    /// <param name="predicate">A function to test each entity for a condition.</param>
+    /// <returns>The number of entities removed.</returns>
+    public int RemoveAll ( Func<TEntity, bool> predicate ) {
+        var database = GetDatabaseInstance ();
+        lock (database.SyncRoot) {
+            List<int> toRemove = new List<int> ();
+            foreach (var items in AsIdentifiedEnumerable ()) {
+                if (predicate ( items.Value )) {
+                    toRemove.Add ( items.Key );
+                }
+            }
+            toRemove.Reverse ();
+            foreach (var id in toRemove) {
+                RemoveAt ( id );
+            }
+            return toRemove.Count;
+        }
     }
 
     IEnumerator IEnumerable.GetEnumerator () {
@@ -193,11 +240,15 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IDisposable where TEnti
         GC.SuppressFinalize ( this );
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Returns the row id of the specified entity in the repository.
+    /// </summary>
+    /// <param name="item">The entity to locate in the repository.</param>
+    /// <returns>The row id of the entity if found; otherwise, -1.</returns>
     public int IndexOf ( TEntity item ) {
         using var enumerator = AsIdentifiedEnumerable ().GetEnumerator ();
         while (enumerator.MoveNext ()) {
-            if (enumerator.Current.Value.Equals ( item ))
+            if (EntityEquals ( enumerator.Current.Value, item ))
                 return enumerator.Current.Key;
         }
         return -1;

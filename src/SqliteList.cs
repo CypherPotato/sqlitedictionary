@@ -26,6 +26,16 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     }
 
     /// <summary>
+    /// Opens an new read-only <see cref="SqliteList"/> instance using the specified
+    /// <see cref="SqliteConnection"/>.
+    /// </summary>
+    /// <param name="connection">The <see cref="SqliteConnection"/> to use.</param>
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteList OpenRead ( SqliteConnection connection, string tableName = "list" ) {
+        return new SqliteList ( connection, tableName, true );
+    }
+
+    /// <summary>
     /// Opens an new <see cref="SqliteList"/> instance in the specified
     /// database name.
     /// </summary>
@@ -34,6 +44,27 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     public static SqliteList Open ( string databaseName, string tableName = "list" ) {
         return new SqliteList ( databaseName, tableName, false );
     }
+
+    /// <summary>
+    /// Opens an new <see cref="SqliteList"/> instance using the specified
+    /// <see cref="SqliteConnection"/>.
+    /// </summary>
+    /// <param name="connection">The <see cref="SqliteConnection"/> to use.</param>
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteList Open ( SqliteConnection connection, string tableName = "list" ) {
+        return new SqliteList ( connection, tableName, false );
+    }
+
+    /// <summary>
+    /// Gets the inner <see cref="SqliteConnection"/>.
+    /// </summary>
+    public SqliteConnection Connection { get => connection; }
+
+    /// <summary>
+    /// Gets the synchronization root for the current instance.
+    /// </summary>
+    /// <value>An object that can be used to synchronize access to the <see cref="SqliteList"/>.</value>
+    public object SyncRoot { get => queryLocker; }
 
     /// <summary>
     /// Gets or sets an value based on their index.
@@ -115,6 +146,14 @@ public sealed class SqliteList : IDisposable, IList<string?> {
 
         connection = new SqliteConnection ( $"Data Source={databaseName};" );
         connection.Open ();
+
+        EnsureListTable ();
+    }
+
+    internal SqliteList ( SqliteConnection connection, string tableName, bool isReadOnly ) {
+        IsReadOnly = isReadOnly;
+        this.tableName = tableName;
+        this.connection = connection;
 
         EnsureListTable ();
     }
@@ -205,7 +244,7 @@ public sealed class SqliteList : IDisposable, IList<string?> {
         foreach (var item in this) {
             if (index >= array.Length)
                 break;
-            array [ index ] = item;
+            array [ index++ ] = item;
         }
     }
 

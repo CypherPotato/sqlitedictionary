@@ -27,6 +27,16 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     }
 
     /// <summary>
+    /// Opens an new read-only <see cref="SqliteDictionary"/> instance using the specified
+    /// <see cref="SqliteConnection"/>.
+    /// </summary>
+    /// <param name="database">The <see cref="SqliteConnection"/> to use.</param>
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteDictionary OpenRead ( SqliteConnection database, string tableName = "base" ) {
+        return new SqliteDictionary ( database, tableName, true );
+    }
+
+    /// <summary>
     /// Opens an new <see cref="SqliteDictionary"/> instance in the specified
     /// database name.
     /// </summary>
@@ -36,24 +46,42 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
         return new SqliteDictionary ( databaseName, tableName, false );
     }
 
+    /// <summary>
+    /// Opens an new <see cref="SqliteDictionary"/> instance using the specified
+    /// <see cref="SqliteConnection"/>.
+    /// </summary>
+    /// <param name="database">The <see cref="SqliteConnection"/> to use.</param>
+    /// <param name="tableName">The database table name.</param>
+    public static SqliteDictionary Open ( SqliteConnection database, string tableName = "base" ) {
+        return new SqliteDictionary ( database, tableName, false );
+    }
+
     internal SqliteDictionary ( string databaseName, string tableName, bool isReadOnly = true ) {
-        this.IsReadOnly = isReadOnly;
+        IsReadOnly = isReadOnly;
         this.tableName = tableName;
 
         if (!databaseName.EndsWith ( ".db", StringComparison.CurrentCultureIgnoreCase ))
             databaseName += ".db";
 
-        this.connection = new SqliteConnection ( $"Data Source={databaseName};" );
-        this.connection.Open ();
+        connection = new SqliteConnection ( $"Data Source={databaseName};" );
+        connection.Open ();
 
-        this.EnsureDictionaryTable ();
+        EnsureDictionaryTable ();
+    }
+
+    internal SqliteDictionary ( SqliteConnection connection, string tableName, bool isReadOnly = true ) {
+        IsReadOnly = isReadOnly;
+        this.tableName = tableName;
+
+        this.connection = connection;
+        EnsureDictionaryTable ();
     }
 
     void EnsureDictionaryTable () {
-        lock (this.queryLocker)
-            using (DbCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (DbCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    CREATE TABLE IF NOT EXISTS "{this.tableName}" (
+                    CREATE TABLE IF NOT EXISTS "{tableName}" (
                         "key"	TEXT NOT NULL UNIQUE,
                         "value"	TEXT,
                         PRIMARY KEY("key")
@@ -65,12 +93,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     }
 
     void CheckDisposed () {
-        if (this.disposed)
+        if (disposed)
             throw new ObjectDisposedException ( nameof ( SqliteDictionary ) );
     }
 
     void CheckReadonly () {
-        if (this.IsReadOnly)
+        if (IsReadOnly)
             throw new InvalidOperationException ( "Cannot modify this dictionary: this database was openned in read-only mode." );
     }
 
@@ -81,9 +109,20 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     }
 
     /// <summary>
+    /// Gets the inner <see cref="SqliteConnection"/>.
+    /// </summary>
+    public SqliteConnection Connection { get => connection; }
+
+    /// <summary>
+    /// Gets the synchronization root for the current instance.
+    /// </summary>
+    /// <value>An object that can be used to synchronize access to the <see cref="SqliteList"/>.</value>
+    public object SyncRoot { get => queryLocker; }
+
+    /// <summary>
     /// Gets the dictionary <see cref="TableName"/>.
     /// </summary>
-    public string TableName { get => this.tableName; }
+    public string TableName { get => tableName; }
 
     /// <summary>
     /// Gets or sets an value based on their key.
@@ -91,25 +130,25 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// <param name="key">The object key.</param>
     public string? this [ string key ] {
         get {
-            this.CheckDisposed ();
-            if (this.TryGetValue ( key, out var value )) {
+            CheckDisposed ();
+            if (TryGetValue ( key, out var value )) {
                 return value;
             }
             return null;
         }
         set {
-            this.CheckDisposed ();
-            this.CheckReadonly ();
-            this.CheckKey ( key );
+            CheckDisposed ();
+            CheckReadonly ();
+            CheckKey ( key );
 
             if (value is null) {
-                this.Remove ( key );
+                Remove ( key );
             }
             else {
-                lock (this.queryLocker)
-                    using (SqliteCommand command = this.connection.CreateCommand ()) {
+                lock (queryLocker)
+                    using (SqliteCommand command = connection.CreateCommand ()) {
                         command.CommandText = $"""
-                        INSERT OR REPLACE INTO "{this.tableName}" (key, value) VALUES (@key, @value);
+                        INSERT OR REPLACE INTO "{tableName}" (key, value) VALUES (@key, @value);
                         """;
 
                         command.Parameters.AddWithValue ( "key", key );
@@ -125,12 +164,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     public ICollection<string> Keys {
         get {
-            this.CheckDisposed ();
+            CheckDisposed ();
 
-            lock (this.queryLocker)
-                using (SqliteCommand command = this.connection.CreateCommand ()) {
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand ()) {
                     command.CommandText = $"""
-                        SELECT key FROM "{this.tableName}";
+                        SELECT key FROM "{tableName}";
                         """;
 
                     List<string> result = new List<string> ();
@@ -150,11 +189,11 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     public ICollection<string?> Values {
         get {
-            this.CheckDisposed ();
-            lock (this.queryLocker)
-                using (SqliteCommand command = this.connection.CreateCommand ()) {
+            CheckDisposed ();
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand ()) {
                     command.CommandText = $"""
-                        SELECT value FROM "{this.tableName}";
+                        SELECT value FROM "{tableName}";
                         """;
 
                     List<string?> result = new List<string?> ();
@@ -174,11 +213,11 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     public int Count {
         get {
-            this.CheckDisposed ();
-            lock (this.queryLocker)
-                using (SqliteCommand command = this.connection.CreateCommand ()) {
+            CheckDisposed ();
+            lock (queryLocker)
+                using (SqliteCommand command = connection.CreateCommand ()) {
                     command.CommandText = $"""
-                        SELECT COUNT(key) FROM "{this.tableName}";
+                        SELECT COUNT(key) FROM "{tableName}";
                         """;
 
                     using (var reader = command.ExecuteReader ()) {
@@ -202,13 +241,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// <param name="key">The unique object key.</param>
     /// <param name="value">The object value.</param>
     public void Add ( string key, string? value ) {
-        this.CheckDisposed ();
-        this.CheckReadonly ();
-        this.CheckKey ( key );
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckReadonly ();
+        CheckKey ( key );
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    INSERT INTO "{this.tableName}" (key, value) VALUES (@key, @value);
+                    INSERT INTO "{tableName}" (key, value) VALUES (@key, @value);
                     """;
 
                 command.Parameters.AddWithValue ( "key", key );
@@ -222,19 +261,19 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     /// <param name="item">The pair of key and value to add.</param>
     public void Add ( KeyValuePair<string, string?> item ) {
-        this.Add ( item.Key, item.Value );
+        Add ( item.Key, item.Value );
     }
 
     /// <summary>
     /// Clears and removes all items from this database.
     /// </summary>
     public void Clear () {
-        this.CheckDisposed ();
-        this.CheckReadonly ();
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckReadonly ();
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    DELETE FROM "{this.tableName}";
+                    DELETE FROM "{tableName}";
                     """;
                 command.ExecuteNonQuery ();
             }
@@ -245,12 +284,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     /// <param name="item">The key-value-pair to check whether is defined or not.</param>
     public bool Contains ( KeyValuePair<string, string?> item ) {
-        this.CheckDisposed ();
-        this.CheckKey ( item.Key );
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckKey ( item.Key );
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT * FROM "{this.tableName}" WHERE key = @key AND value = @value LIMIT 1;
+                    SELECT * FROM "{tableName}" WHERE key = @key AND value = @value LIMIT 1;
                     """;
                 command.Parameters.AddWithValue ( "key", item.Key );
                 command.Parameters.AddWithValue ( "value", item.Value );
@@ -269,12 +308,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     /// <param name="key">The key to search.</param>
     public bool ContainsKey ( string key ) {
-        this.CheckDisposed ();
-        this.CheckKey ( key );
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckKey ( key );
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT * FROM "{this.tableName}" WHERE key = @key LIMIT 1;
+                    SELECT * FROM "{tableName}" WHERE key = @key LIMIT 1;
                     """;
                 command.Parameters.AddWithValue ( "key", key );
 
@@ -296,10 +335,10 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 
     /// <inheritdoc/>
     public IEnumerator<KeyValuePair<string, string?>> GetEnumerator () {
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT key, value FROM "{this.tableName}";
+                    SELECT key, value FROM "{tableName}";
                     """;
 
                 using (var reader = command.ExecuteReader ()) {
@@ -322,13 +361,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     /// <param name="key">The key to remove.</param>
     public bool Remove ( string key ) {
-        this.CheckDisposed ();
-        this.CheckReadonly ();
-        this.CheckKey ( key );
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckReadonly ();
+        CheckKey ( key );
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    DELETE FROM "{this.tableName}" WHERE key = @key;
+                    DELETE FROM "{tableName}" WHERE key = @key;
                     """;
                 command.Parameters.AddWithValue ( "key", key );
                 command.ExecuteNonQuery ();
@@ -344,13 +383,13 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     /// <param name="item">The value-key pair to remove.</param>
     public bool Remove ( KeyValuePair<string, string?> item ) {
-        this.CheckDisposed ();
-        this.CheckReadonly ();
-        this.CheckKey ( item.Key );
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckReadonly ();
+        CheckKey ( item.Key );
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    DELETE FROM "{this.tableName}" WHERE key = @key AND value = @value;
+                    DELETE FROM "{tableName}" WHERE key = @key AND value = @value;
                     """;
                 command.Parameters.AddWithValue ( "key", item.Key );
                 command.Parameters.AddWithValue ( "value", item.Value );
@@ -367,7 +406,7 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// </summary>
     /// <param name="key">The key whose value to get.</param>
     public (bool CouldGet, string? Value) TryGetValue ( string key ) {
-        if (this.TryGetValue ( key, out var value )) {
+        if (TryGetValue ( key, out var value )) {
             return (true, value);
         }
         return (false, null);
@@ -375,12 +414,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 
     /// <inheritdoc/>
     public bool TryGetValue ( string key, [MaybeNullWhen ( false )] out string? value ) {
-        this.CheckDisposed ();
-        this.CheckKey ( key );
-        lock (this.queryLocker)
-            using (SqliteCommand command = this.connection.CreateCommand ()) {
+        CheckDisposed ();
+        CheckKey ( key );
+        lock (queryLocker)
+            using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
-                    SELECT value FROM "{this.tableName}" WHERE key = @key LIMIT 1;
+                    SELECT value FROM "{tableName}" WHERE key = @key LIMIT 1;
                     """;
                 command.Parameters.AddWithValue ( "key", key );
 
@@ -397,12 +436,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     }
 
     IEnumerator IEnumerable.GetEnumerator () {
-        return this.GetEnumerator ();
+        return GetEnumerator ();
     }
 
     /// <inheritdoc/>
     public void Dispose () {
-        this.disposed = true;
-        this.connection.Dispose ();
+        disposed = true;
+        connection.Dispose ();
     }
 }

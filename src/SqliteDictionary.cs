@@ -174,7 +174,7 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 
                     List<string> result = new List<string> ();
                     using (var reader = command.ExecuteReader ()) {
-                        if (reader.Read ()) {
+                        while (reader.Read ()) {
                             result.Add ( reader.GetString ( 0 ) );
                         }
                     }
@@ -198,7 +198,7 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
 
                     List<string?> result = new List<string?> ();
                     using (var reader = command.ExecuteReader ()) {
-                        if (reader.Read ()) {
+                        while (reader.Read ()) {
                             result.Add ( reader.IsDBNull ( 0 ) ? null : reader.GetString ( 0 ) );
                         }
                     }
@@ -330,7 +330,12 @@ public sealed class SqliteDictionary : IDisposable, IDictionary<string, string?>
     /// This method is not implemented and should not be used.
     /// </summary>
     public void CopyTo ( KeyValuePair<string, string?> [] array, int arrayIndex ) {
-        throw new NotImplementedException ( "This database does not support this action." );
+        int index = arrayIndex;
+        foreach (var item in this) {
+            if (index >= array.Length)
+                break;
+            array [ index++ ] = item;
+        }
     }
 
     /// <inheritdoc/>

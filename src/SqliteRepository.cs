@@ -9,7 +9,7 @@ namespace CypherPotato.SqliteCollections;
 /// Represents a repository for storing and retrieving entities in a SQLite database.
 /// </summary>
 /// <typeparam name="TEntity">The type of entity stored in the repository.</typeparam>
-public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>, IDisposable where TEntity : notnull {
+public class SqliteRepository<TEntity> : ICollection<TEntity>, IReadOnlyCollection<TEntity>, IDisposable where TEntity : notnull {
     private SqliteList? sqliteList;
     private bool disposedValue;
 
@@ -69,20 +69,16 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>,
     /// </summary>
     public bool IsReadOnly => GetDatabaseInstance ().IsReadOnly;
 
-    /// <inheritdoc/>
-    public TEntity this [ int index ] {
-        get {
-            string? serializedEntity = GetDatabaseInstance () [ index ];
-            if (serializedEntity is null)
-                throw new KeyNotFoundException ();
-
-            return DeserializeEntity ( serializedEntity );
-
-        }
-        set {
-            var serializedEntity = SerializeEntity ( value );
-            GetDatabaseInstance () [ index ] = serializedEntity;
-        }
+    /// <summary>
+    /// Finds an entity in the repository by its identifier.
+    /// </summary>
+    /// <param name="id">The identifier of the entity to find.</param>
+    /// <returns>The found entity, or the default value of <typeparamref name="TEntity"/> if not found.</returns>
+    public TEntity? Find ( int id ) {
+        string? serializedEntity = GetDatabaseInstance () [ id ];
+        if (serializedEntity is null)
+            return default;
+        return DeserializeEntity ( serializedEntity );
     }
 
     /// <summary>
@@ -105,8 +101,31 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>,
             Add ( item );
         }
         else {
-            this [ foundId ] = item;
+            Update ( foundId, item );
         }
+    }
+
+    /// <summary>
+    /// Updates all entities in the repository that match the specified predicate.
+    /// </summary>
+    /// <param name="findPredicate">A function that determines whether an entity should be updated.</param>
+    /// <param name="item">The updated entity to replace the matching entities with.</param>
+    public void UpdateAll ( Func<TEntity, bool> findPredicate, TEntity item ) {
+        foreach (var iitem in AsIdentifiedEnumerable ()) {
+            if (findPredicate ( iitem.Entity )) {
+                Update ( iitem.Id, item );
+            }
+        }
+    }
+
+    /// <summary>
+    /// Updates an existing entity in the repository.
+    /// </summary>
+    /// <param name="id">The identifier of the entity to update.</param>
+    /// <param name="item">The updated entity.</param>
+    public void Update ( int id, TEntity item ) {
+        var serializedEntity = SerializeEntity ( item );
+        GetDatabaseInstance () [ id ] = serializedEntity;
     }
 
     /// <summary>
@@ -161,12 +180,12 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>,
     /// Returns an enumerator that iterates through the entities in the repository, along with their row id.
     /// </summary>
     /// <returns>An enumerator that iterates through the entities in the repository, along with their row id.</returns>
-    public IEnumerable<KeyValuePair<int, TEntity>> AsIdentifiedEnumerable () {
+    public IEnumerable<EntityIdentifier<TEntity>> AsIdentifiedEnumerable () {
         foreach (var row in GetDatabaseInstance ().AsIdentifiedEnumerable ()) {
-            if (row.Value is null)
+            if (row.Entity is null)
                 continue;
 
-            yield return new KeyValuePair<int, TEntity> ( row.Key, DeserializeEntity ( row.Value ) );
+            yield return new EntityIdentifier<TEntity> ( row.Id, DeserializeEntity ( row.Entity ) );
         }
     }
 
@@ -186,8 +205,8 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>,
     public bool Remove ( TEntity item ) {
         using var enumerator = AsIdentifiedEnumerable ().GetEnumerator ();
         while (enumerator.MoveNext ()) {
-            if (EntityEquals ( enumerator.Current.Value, item )) {
-                RemoveAt ( enumerator.Current.Key );
+            if (EntityEquals ( enumerator.Current.Entity, item )) {
+                RemoveAt ( enumerator.Current.Id );
                 return true;
             }
         }
@@ -204,8 +223,8 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>,
         lock (database.SyncRoot) {
             List<int> toRemove = new List<int> ();
             foreach (var items in AsIdentifiedEnumerable ()) {
-                if (predicate ( items.Value )) {
-                    toRemove.Add ( items.Key );
+                if (predicate ( items.Entity )) {
+                    toRemove.Add ( items.Id );
                 }
             }
             toRemove.Reverse ();
@@ -248,13 +267,9 @@ public class SqliteRepository<TEntity> : IList<TEntity>, IReadOnlyList<TEntity>,
     public int IndexOf ( TEntity item ) {
         using var enumerator = AsIdentifiedEnumerable ().GetEnumerator ();
         while (enumerator.MoveNext ()) {
-            if (EntityEquals ( enumerator.Current.Value, item ))
-                return enumerator.Current.Key;
+            if (EntityEquals ( enumerator.Current.Entity, item ))
+                return enumerator.Current.Id;
         }
         return -1;
-    }
-
-    void IList<TEntity>.Insert ( int index, TEntity item ) {
-        throw new NotSupportedException ();
     }
 }

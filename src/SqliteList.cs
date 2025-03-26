@@ -251,7 +251,7 @@ public sealed class SqliteList : IDisposable, IList<string?> {
     /// <summary>
     /// Returns an iterator that iterates the collection values and row IDs from this collection.
     /// </summary>
-    public IEnumerable<KeyValuePair<int, string?>> AsIdentifiedEnumerable () {
+    public IEnumerable<EntityIdentifier<string?>> AsIdentifiedEnumerable () {
         lock (queryLocker)
             using (SqliteCommand command = connection.CreateCommand ()) {
                 command.CommandText = $"""
@@ -268,7 +268,7 @@ public sealed class SqliteList : IDisposable, IList<string?> {
                             value = reader.GetString ( 1 );
                         }
 
-                        yield return new KeyValuePair<int, string?> ( key, value );
+                        yield return new EntityIdentifier<string?> ( key, value );
                     }
                 }
             }

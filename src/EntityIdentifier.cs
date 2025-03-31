@@ -13,7 +13,7 @@ public readonly struct EntityIdentifier<TEntity> {
     /// <summary>
     /// Gets the unique identifier of the entity.
     /// </summary>
-    public int Id { get; }
+    public long Id { get; }
 
     /// <summary>
     /// Gets the entity associated with the identifier.
@@ -25,7 +25,7 @@ public readonly struct EntityIdentifier<TEntity> {
     /// </summary>
     /// <param name="id">The unique identifier of the entity.</param>
     /// <param name="entity">The entity associated with the identifier.</param>
-    public EntityIdentifier ( int id, TEntity entity ) {
+    public EntityIdentifier ( long id, TEntity entity ) {
         Id = id;
         Entity = entity;
     }
@@ -64,7 +64,7 @@ public readonly struct EntityIdentifier<TEntity> {
     /// <param name="id">The unique identifier of the entity.</param>
     /// <param name="value">The entity associated with the identifier.</param>
     [EditorBrowsable ( EditorBrowsableState.Never )]
-    public void Deconstruct ( out int id, out TEntity value ) {
+    public void Deconstruct ( out long id, out TEntity value ) {
         id = Id;
         value = Entity;
     }
